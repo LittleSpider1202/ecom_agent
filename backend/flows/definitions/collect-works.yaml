@@ -1,0 +1,135 @@
+# 流程定义 - 采集达人作品
+id: collect-works
+name: 采集达人作品
+version: 4
+description: 采集指定达人的作品列表，写入数据表
+
+trigger:
+  type: manual
+
+# ============ 参数定义（用户表单输入）============
+parameters:
+  - key: platform
+    type: string
+    label: 平台
+    input: select
+    options: [抖音]
+    default: 抖音
+    required: true
+    row: 1
+    span: 4
+
+  - key: douyinId
+    type: string
+    label: 抖音号
+    required: true
+    row: 1
+    span: 8
+
+  - key: fields
+    type: array
+    label: 采集字段
+    input: checkbox
+    options:
+      - 视频链接
+      - 发布时间
+      - 封面标题
+      - 点赞数
+      - 收藏数
+      - 转发数
+      - 评论数
+      - 视频封面图
+    default:
+      - 视频链接
+      - 发布时间
+      - 封面标题
+      - 点赞数
+      - 收藏数
+      - 转发数
+      - 评论数
+    required: true
+
+  - key: dataSourceId
+    type: number
+    label: 数据源
+    input: datasource
+    required: true
+    row: 2
+    span: 8
+
+  - key: writeMode
+    type: string
+    label: 写入方式
+    input: select
+    options: [新建, 追加]
+    default: 新建
+    required: true
+    row: 2
+    span: 4
+    showWhen:
+      sourceType: feishu
+
+  - key: tableName
+    type: string
+    label: 文件名
+    input: select
+    options: [达人名称, 达人名称_日期]
+    default: 达人名称
+    required: true
+    row: 3
+    span: 12
+    showWhen:
+      writeMode: 新建
+
+  - key: tableId
+    type: string
+    label: 多维表格ID
+    placeholder: 请输入多维表格ID
+    required: true
+    row: 3
+    span: 12
+    showWhen:
+      sourceType: feishu
+      writeMode: 追加
+
+# ============ 节点定义 ============
+# 前端展示为两个步骤，实际执行为一个 RPA 调用
+# fetch_works 包含全部 inputs 用于 RPA 执行
+# write_to_doc 仅用于前端展示参数分组，不参与执行
+nodes:
+  - id: fetch_works
+    name: 采集作品
+    category: execute
+    type: rpa
+    config:
+      script: 采集作品-抖音
+    inputs:
+      platform: "{{ platform }}"
+      douyinId: "{{ douyinId }}"
+      fields: "{{ fields }}"
+      dataSourceId: "{{ dataSourceId }}"
+      writeMode: "{{ writeMode }}"
+      tableName: "{{ tableName }}"
+      tableId: "{{ tableId }}"
+    outputs: []
+
+  - id: write_to_doc
+    name: 写入文档
+    category: display
+    type: rpa
+    config:
+      script: 采集作品-抖音
+    inputs:
+      dataSourceId: "{{ dataSourceId }}"
+      writeMode: "{{ writeMode }}"
+      tableName: "{{ tableName }}"
+      tableId: "{{ tableId }}"
+    outputs: []
+
+# ============ 连接定义 ============
+# 只有 fetch_works 参与实际执行流程
+connections:
+  start: fetch_works
+  fetch_works:
+    success: null
+    error: null

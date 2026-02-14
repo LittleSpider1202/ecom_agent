@@ -1,0 +1,92 @@
+# 流程定义 - 开票流程
+id: invoice-process
+name: 给买家开票
+version: 13
+description: 收集待开票订单，发送给代记账，录入发票并更新系统
+
+trigger:
+  type: manual
+
+# ============ 参数定义（用户表单输入）============
+parameters:
+  - key: excelPath
+    type: string
+    label: 开票清单Excel文件
+    input: file
+    accept: .xlsx,.xls,.csv
+    default: D:\九月的诗\开票\开票.xlsx
+    required: true
+
+# ============ 变量定义（运行时变量）============
+variables:
+  - key: orderList
+    type: array
+    scope: local
+
+  - key: totalAmount
+    type: number
+    scope: local
+
+  - key: invoiceCount
+    type: number
+    scope: local
+
+  - key: invoiceFiles
+    type: array
+    scope: local
+
+# ============ 节点定义（3个执行单元）============
+nodes:
+  # 执行单元1：发送开票清单
+  - id: send_invoice_list
+    name: 发送开票清单
+    category: execute
+    type: rpa
+    config:
+      script: 开票-整理excel
+    inputs:
+      excelPath: "{{ excelPath }}"
+    outputs:
+      orderList: []
+
+  # 执行单元2：录入发票
+  - id: input_invoice
+    name: 录入发票
+    category: execute
+    type: manual
+    config:
+      fields:
+        - key: invoiceFiles
+          type: file
+          label: 发票PDF文件
+          accept: .pdf
+          multiple: true
+          required: true
+    inputs: {}
+    outputs:
+      - invoiceFiles
+
+  # 执行单元3：录入系统
+  - id: download_and_update
+    name: 录入系统
+    category: execute
+    type: rpa
+    config:
+      script: 开票-录入系统
+    inputs:
+      invoiceFiles: "{{ invoiceFiles }}"
+    outputs:
+      orderList: []
+
+# ============ 连接定义 ============
+connections:
+  start: send_invoice_list
+  send_invoice_list:
+    success: input_invoice
+    error: null
+  input_invoice:
+    success: download_and_update
+    error: null
+  download_and_update:
+    success: null
+    error: null

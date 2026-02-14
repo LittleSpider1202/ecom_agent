@@ -1,0 +1,496 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>ecom_agent 系统架构图</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, 'PingFang SC', 'Microsoft YaHei', sans-serif;
+    background: #f8f9fa;
+    padding: 40px;
+    color: #1a1a2e;
+  }
+  h1 {
+    text-align: center;
+    font-size: 28px;
+    font-weight: 700;
+    margin-bottom: 6px;
+    color: #1a1a2e;
+  }
+  .subtitle {
+    text-align: center;
+    font-size: 14px;
+    color: #888;
+    margin-bottom: 36px;
+  }
+  .canvas {
+    max-width: 1100px;
+    margin: 0 auto;
+    position: relative;
+  }
+
+  /* ---- Layer ---- */
+  .layer {
+    background: white;
+    border-radius: 16px;
+    padding: 20px 24px 16px;
+    margin-bottom: 20px;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.06);
+    position: relative;
+  }
+  .layer-title {
+    font-size: 12px;
+    font-weight: 600;
+    color: #fff;
+    background: #6c63ff;
+    display: inline-block;
+    padding: 3px 12px;
+    border-radius: 10px;
+    position: absolute;
+    top: -12px;
+    left: 24px;
+  }
+  .layer.frontend .layer-title { background: #3b82f6; }
+  .layer.api .layer-title { background: #10b981; }
+  .layer.engine .layer-title { background: #f59e0b; }
+  .layer.infra .layer-title { background: #ef4444; }
+
+  /* ---- Boxes ---- */
+  .row {
+    display: flex;
+    gap: 12px;
+    margin: 8px 0;
+    flex-wrap: wrap;
+  }
+  .box {
+    background: #f0f4ff;
+    border: 1.5px solid #d0d8f0;
+    border-radius: 10px;
+    padding: 12px 16px;
+    flex: 1;
+    min-width: 120px;
+  }
+  .box-title {
+    font-size: 13px;
+    font-weight: 700;
+    color: #1e3a5f;
+    margin-bottom: 4px;
+  }
+  .box-sub {
+    font-size: 11px;
+    color: #666;
+    line-height: 1.5;
+  }
+  .box.highlight {
+    background: #fff7ed;
+    border-color: #f59e0b;
+  }
+  .box.core {
+    background: #fef3c7;
+    border-color: #f59e0b;
+    border-width: 2px;
+  }
+  .box.green {
+    background: #ecfdf5;
+    border-color: #10b981;
+  }
+  .box.blue {
+    background: #eff6ff;
+    border-color: #3b82f6;
+  }
+  .box.red {
+    background: #fef2f2;
+    border-color: #ef4444;
+  }
+
+  /* ---- Connector arrows ---- */
+  .connector {
+    text-align: center;
+    padding: 4px 0;
+    color: #aaa;
+    font-size: 20px;
+    letter-spacing: 4px;
+  }
+  .connector-label {
+    font-size: 11px;
+    color: #999;
+    text-align: center;
+    margin-top: -2px;
+    margin-bottom: 4px;
+  }
+
+  /* ---- Von Neumann callout ---- */
+  .callout {
+    position: absolute;
+    right: 24px;
+    top: 12px;
+    background: #fef3c7;
+    border: 1.5px dashed #f59e0b;
+    border-radius: 10px;
+    padding: 10px 14px;
+    font-size: 11px;
+    line-height: 1.6;
+    color: #92400e;
+    max-width: 200px;
+  }
+  .callout-title {
+    font-weight: 700;
+    font-size: 12px;
+    margin-bottom: 4px;
+  }
+
+  /* ---- Tags ---- */
+  .tag {
+    display: inline-block;
+    font-size: 10px;
+    padding: 1px 7px;
+    border-radius: 6px;
+    margin-right: 4px;
+    font-weight: 600;
+  }
+  .tag.vue { background: #dbeafe; color: #1d4ed8; }
+  .tag.py { background: #d1fae5; color: #065f46; }
+  .tag.yaml { background: #fef3c7; color: #92400e; }
+  .tag.db { background: #fee2e2; color: #991b1b; }
+  .tag.rpa { background: #e9d5ff; color: #6b21a8; }
+
+  /* ---- Mini diagram in engine ---- */
+  .engine-inner {
+    display: flex;
+    gap: 12px;
+    align-items: stretch;
+  }
+  .engine-col {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .engine-col.center {
+    flex: 0 0 40px;
+    justify-content: center;
+    align-items: center;
+    color: #999;
+    font-size: 22px;
+  }
+
+  /* ---- Footer note ---- */
+  .footer-note {
+    text-align: center;
+    font-size: 12px;
+    color: #aaa;
+    margin-top: 24px;
+  }
+
+  /* Executor grid */
+  .executor-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 8px;
+  }
+  .executor-item {
+    background: white;
+    border: 1.5px solid #e5e7eb;
+    border-radius: 8px;
+    padding: 8px 10px;
+    text-align: center;
+  }
+  .executor-item .name {
+    font-size: 12px;
+    font-weight: 600;
+    color: #374151;
+  }
+  .executor-item .desc {
+    font-size: 10px;
+    color: #9ca3af;
+    margin-top: 2px;
+  }
+
+  /* Flow arrows inside engine */
+  .flow-arrow {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    font-size: 11px;
+    color: #9ca3af;
+    padding: 2px 0;
+  }
+  .flow-arrow .arrow { font-size: 16px; }
+
+  /* Data flow section */
+  .dataflow {
+    background: #fafafa;
+    border: 1px dashed #d1d5db;
+    border-radius: 10px;
+    padding: 16px;
+    margin-top: 8px;
+  }
+  .dataflow-title {
+    font-size: 12px;
+    font-weight: 700;
+    color: #6b7280;
+    margin-bottom: 8px;
+  }
+  .dataflow-steps {
+    display: flex;
+    align-items: center;
+    gap: 0;
+    flex-wrap: wrap;
+  }
+  .dataflow-step {
+    background: white;
+    border: 1px solid #e5e7eb;
+    border-radius: 6px;
+    padding: 6px 12px;
+    font-size: 11px;
+    color: #374151;
+    white-space: nowrap;
+  }
+  .dataflow-step.var {
+    background: #fef3c7;
+    border-color: #f59e0b;
+    font-weight: 600;
+  }
+  .dataflow-arrow {
+    font-size: 16px;
+    color: #d1d5db;
+    padding: 0 4px;
+  }
+</style>
+</head>
+<body>
+
+<h1>ecom_agent 系统架构</h1>
+<div class="subtitle">电商自动化代理 — YAML 驱动的 DAG 流程引擎 + RPA 编排系统</div>
+
+<div class="canvas">
+
+  <!-- ========== FRONTEND ========== -->
+  <div class="layer frontend">
+    <span class="layer-title">Frontend — Vue 3 + Element Plus</span>
+    <div class="row" style="margin-top: 12px;">
+      <div class="box blue">
+        <div class="box-title">Home <span class="tag vue">Vue</span></div>
+        <div class="box-sub">侧栏导航 + 任务面板<br>流程类型选择入口</div>
+      </div>
+      <div class="box blue">
+        <div class="box-title">TaskConfig</div>
+        <div class="box-sub">动态参数表单<br>row/span 布局 + checkbox</div>
+      </div>
+      <div class="box blue">
+        <div class="box-title">TaskDetail</div>
+        <div class="box-sub">执行进度 + 节点状态<br>人工节点动态表单</div>
+      </div>
+      <div class="box blue">
+        <div class="box-title">Storage / Manager</div>
+        <div class="box-sub">数据源管理 (飞书/NocoDB)<br>任务流程管理</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="connector">&#9661;</div>
+  <div class="connector-label">REST API + WebSocket (实时推送)</div>
+
+  <!-- ========== API ========== -->
+  <div class="layer api">
+    <span class="layer-title">API Layer — FastAPI</span>
+    <div class="row" style="margin-top: 12px;">
+      <div class="box green">
+        <div class="box-title">/api/flows</div>
+        <div class="box-sub">YAML → 前端格式转换<br>热重载 /reload</div>
+      </div>
+      <div class="box green">
+        <div class="box-title">/api/tasks</div>
+        <div class="box-sub">CRUD + 启动/恢复<br>立即/周期调度</div>
+      </div>
+      <div class="box green">
+        <div class="box-title">/api/callback</div>
+        <div class="box-sub">RPA 回调入口<br>人工操作提交</div>
+      </div>
+      <div class="box green">
+        <div class="box-title">/api/storage</div>
+        <div class="box-sub">数据源 CRUD<br>多实例 + 密钥遮蔽</div>
+      </div>
+      <div class="box green">
+        <div class="box-title">/api/ws</div>
+        <div class="box-sub">WebSocket<br>节点状态实时推送</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="connector">&#9661;</div>
+
+  <!-- ========== ENGINE ========== -->
+  <div class="layer engine" style="padding-bottom: 20px;">
+    <span class="layer-title">Flow Engine — 核心引擎</span>
+    <div class="callout">
+      <div class="callout-title">冯诺依曼类比</div>
+      VarStore = 存储器<br>
+      TaskHandler = 控制器<br>
+      Executors = 运算器<br>
+      {{ key }} = 地址寻址<br>
+      current_node = PC 指针
+    </div>
+
+    <div class="engine-inner" style="margin-top: 12px;">
+      <!-- Left: Flow definition -->
+      <div class="engine-col" style="flex: 0 0 180px;">
+        <div class="box highlight">
+          <div class="box-title">Flow Registry <span class="tag yaml">YAML</span></div>
+          <div class="box-sub">
+            流程定义加载<br>
+            DAG: nodes + connections<br>
+            parameters / variables<br>
+            热重载支持
+          </div>
+        </div>
+        <div class="box highlight">
+          <div class="box-title">Field Catalog</div>
+          <div class="box-sub">
+            多平台字段目录<br>
+            common + 平台特有<br>
+            (抖音/小红书/视频号)
+          </div>
+        </div>
+      </div>
+
+      <!-- Center: Core -->
+      <div class="engine-col" style="flex: 2;">
+        <div class="box core">
+          <div class="box-title">TaskHandler (控制器) <span class="tag py">Python</span></div>
+          <div class="box-sub">
+            <b>两层循环：</b><br>
+            外层 — DAG 遍历：读 connections → 确定下一节点<br>
+            内层 — 节点执行：resolve {{ }} → dispatch → save outputs<br>
+            <b>状态机：</b> pending → running → waiting → completed/failed
+          </div>
+        </div>
+
+        <div style="display: flex; gap: 12px;">
+          <div class="box core" style="flex: 1;">
+            <div class="box-title">VarStore (存储器)</div>
+            <div class="box-sub">
+              统一地址空间<br>
+              parameters + context 合并<br>
+              lazy-load from DB<br>
+              {{ key }} 表达式寻址
+            </div>
+          </div>
+          <div class="box" style="flex: 1; background: #f3e8ff; border-color: #a78bfa;">
+            <div class="box-title">JobScheduler</div>
+            <div class="box-sub">
+              APScheduler<br>
+              immediate: 立即执行<br>
+              periodic: cron 表达式<br>
+              任务恢复 & 重试
+            </div>
+          </div>
+        </div>
+
+        <!-- Executors -->
+        <div style="background: #f9fafb; border: 1.5px solid #e5e7eb; border-radius: 10px; padding: 12px;">
+          <div style="font-size: 12px; font-weight: 700; color: #6b7280; margin-bottom: 8px;">Executors (运算器)</div>
+          <div class="executor-grid">
+            <div class="executor-item" style="border-color: #a78bfa;">
+              <div class="name" style="color: #7c3aed;">RPA</div>
+              <div class="desc">影刀脚本执行<br>文件协议 + 回调</div>
+            </div>
+            <div class="executor-item" style="border-color: #3b82f6;">
+              <div class="name" style="color: #2563eb;">Manual</div>
+              <div class="desc">人工介入节点<br>动态表单 + 确认</div>
+            </div>
+            <div class="executor-item" style="border-color: #10b981;">
+              <div class="name" style="color: #059669;">System</div>
+              <div class="desc">系统内置操作<br>数据处理/转换</div>
+            </div>
+            <div class="executor-item" style="border-color: #f59e0b;">
+              <div class="name" style="color: #d97706;">Feishu</div>
+              <div class="desc">飞书通知/读写<br>多维表格操作</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Data flow -->
+    <div class="dataflow">
+      <div class="dataflow-title">核心数据流 (单节点执行)</div>
+      <div class="dataflow-steps">
+        <div class="dataflow-step">YAML inputs</div>
+        <div class="dataflow-arrow">&rarr;</div>
+        <div class="dataflow-step var">VarStore.resolve("{{ key }}")</div>
+        <div class="dataflow-arrow">&rarr;</div>
+        <div class="dataflow-step">Executor.execute(params)</div>
+        <div class="dataflow-arrow">&rarr;</div>
+        <div class="dataflow-step var">VarStore.set(outputs)</div>
+        <div class="dataflow-arrow">&rarr;</div>
+        <div class="dataflow-step">connections → next node</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="connector">&#9661;</div>
+
+  <!-- ========== INFRA ========== -->
+  <div class="layer infra">
+    <span class="layer-title">Infrastructure — 外部依赖</span>
+    <div class="row" style="margin-top: 12px;">
+      <div class="box red">
+        <div class="box-title">SQLite <span class="tag db">DB</span></div>
+        <div class="box-sub">
+          tasks / task_nodes<br>
+          data_sources / events<br>
+          rpa_scripts<br>
+          aiosqlite 异步驱动
+        </div>
+      </div>
+      <div class="box" style="background: #f3e8ff; border-color: #a78bfa;">
+        <div class="box-title">影刀 RPA Worker <span class="tag rpa">RPA</span></div>
+        <div class="box-sub">
+          <b>下发：</b>JSON 文件写入监控目录<br>
+          <b>回调：</b>HTTP POST /callback/rpa<br>
+          <b>部署：</b>员工 PC 本地运行
+        </div>
+      </div>
+      <div class="box highlight">
+        <div class="box-title">飞书多维表格</div>
+        <div class="box-sub">
+          当前数据层<br>
+          通过开放平台 API 读写<br>
+          app_id + app_secret
+        </div>
+      </div>
+      <div class="box" style="background: #f0fdf4; border-color: #86efac;">
+        <div class="box-title">NocoDB <span style="font-size:10px;color:#999">(规划中)</span></div>
+        <div class="box-sub">
+          未来数据层迁移目标<br>
+          REST API + 唯一约束<br>
+          替代飞书多维表格
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ========== YAML Flow Example ========== -->
+  <div class="layer" style="background: #1e293b; color: #e2e8f0;">
+    <span class="layer-title" style="background: #475569;">YAML 流程定义示例 — invoice-process</span>
+    <pre style="margin-top: 12px; font-size: 12px; line-height: 1.7; font-family: 'Cascadia Code', 'Fira Code', monospace; overflow-x: auto;"><span style="color:#94a3b8;">connections:</span>
+  <span style="color:#fbbf24;">start</span>: send_invoice_list
+  <span style="color:#fbbf24;">send_invoice_list</span>:
+    <span style="color:#4ade80;">success</span>: input_invoice        <span style="color:#64748b;"># ── RPA 完成 → 人工录入</span>
+  <span style="color:#fbbf24;">input_invoice</span>:
+    <span style="color:#4ade80;">success</span>: download_and_update   <span style="color:#64748b;"># ── 人工确认 → RPA 录入</span>
+  <span style="color:#fbbf24;">download_and_update</span>:
+    <span style="color:#4ade80;">success</span>: <span style="color:#f87171;">null</span>                 <span style="color:#64748b;"># ── 流程结束</span></pre>
+  </div>
+
+</div>
+
+<div class="footer-note">
+  ecom_agent v2.1 &nbsp;|&nbsp; FastAPI + Vue 3 + SQLite &nbsp;|&nbsp; YAML-driven DAG Engine + RPA Orchestration
+</div>
+
+</body>
+</html>

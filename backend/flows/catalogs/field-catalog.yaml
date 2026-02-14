@@ -1,0 +1,78 @@
+# 采集字段目录 - 按平台定义可采集字段
+# 设计原则：公共字段 + 平台特有字段
+
+common:
+  - key: videoUrl
+    label: 视频链接
+    type: string
+    default_selected: true
+
+  - key: publishTime
+    label: 发布时间
+    type: datetime
+    default_selected: true
+
+  - key: coverTitle
+    label: 封面标题
+    type: string
+    default_selected: true
+
+  - key: likes
+    label: 点赞数
+    type: number
+    default_selected: true
+
+  - key: favorites
+    label: 收藏数
+    type: number
+    default_selected: true
+
+  - key: shares
+    label: 转发数
+    type: number
+    default_selected: true
+
+  - key: comments
+    label: 评论数
+    type: number
+    default_selected: true
+
+  - key: coverImage
+    label: 视频封面图
+    type: image
+    default_selected: false
+
+platforms:
+  抖音:
+    - key: videoDuration
+      label: 视频时长
+      type: number
+      default_selected: false
+
+    - key: tags
+      label: 合拍/贴纸标签
+      type: string
+      default_selected: false
+
+  小红书:
+    - key: noteType
+      label: 笔记类型
+      type: enum
+      options: [图文, 视频]
+      default_selected: true
+
+    - key: topics
+      label: 话题标签
+      type: array
+      default_selected: true
+
+  视频号:
+    - key: watching
+      label: 在看数
+      type: number
+      default_selected: true
+
+    - key: isOriginal
+      label: 原创标记
+      type: boolean
+      default_selected: false

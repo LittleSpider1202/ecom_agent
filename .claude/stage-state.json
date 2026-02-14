@@ -1,0 +1,50 @@
+{
+  "currentStage": "dev",
+  "version": 1,
+  "planMode": false,
+  "history": [
+    {
+      "stage": "req",
+      "version": 1,
+      "status": "in_progress",
+      "timestamp": "2026-02-03T00:00:00.000Z"
+    },
+    {
+      "stage": "req",
+      "version": 1,
+      "status": "pending_review",
+      "timestamp": "2026-02-03T00:30:00.000Z"
+    },
+    {
+      "stage": "req",
+      "version": 1,
+      "status": "passed",
+      "timestamp": "2026-02-03T01:00:00.000Z"
+    },
+    {
+      "stage": "design",
+      "version": 1,
+      "status": "in_progress",
+      "timestamp": "2026-02-03T01:00:00.000Z"
+    },
+    {
+      "stage": "design",
+      "version": 1,
+      "status": "pending_review",
+      "timestamp": "2026-02-03T02:00:00.000Z"
+    },
+    {
+      "stage": "design",
+      "version": 1,
+      "status": "passed",
+      "timestamp": "2026-02-03T02:30:00.000Z"
+    },
+    {
+      "stage": "dev",
+      "version": 1,
+      "status": "in_progress",
+      "timestamp": "2026-02-03T02:30:00.000Z"
+    }
+  ],
+  "constraints": []
+}
