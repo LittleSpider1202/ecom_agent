@@ -75,8 +75,8 @@ class RedisDispatcher:
         """查找第一个在线的 worker"""
         try:
             import aiosqlite
-            from db.database import DB_PATH
-            async with aiosqlite.connect(DB_PATH) as db:
+            from config import DATABASE_PATH
+            async with aiosqlite.connect(DATABASE_PATH) as db:
                 cursor = await db.execute(
                     "SELECT id FROM workers WHERE status IN ('online', 'busy') "
                     "ORDER BY last_heartbeat DESC LIMIT 1"
