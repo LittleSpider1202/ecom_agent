@@ -28,6 +28,98 @@ SCRIPT_IDS = [
 ]
 
 
+# ========== Redis 队列消费 ==========
+
+class RedisTaskListener:
+    """Redis 队列任务消费器
+
+    使用 BRPOP 从多个队列监听任务。
+    队列优先级：worker > role > script。
+    admin 角色监听所有角色队列。
+    """
+
+    ALL_ROLES = ["finance", "operations", "customer_service", "warehouse", "content"]
+
+    def __init__(self, redis_url, worker_id=None, role=None, script_ids=None, print_fn=None):
+        self.redis_url = redis_url
+        self.worker_id = worker_id
+        self.role = role
+        self.script_ids = script_ids or []
+        self.print_fn = print_fn or print
+        self._redis = None
+
+    def _get_redis(self):
+        """懒初始化 Redis 连接"""
+        if self._redis is None:
+            try:
+                import redis as redis_lib
+                self._redis = redis_lib.from_url(self.redis_url, decode_responses=True)
+                self._redis.ping()
+                self.print_fn(f"[RedisListener] Redis connected: {self.redis_url}")
+            except Exception as e:
+                self.print_fn(f"[RedisListener] Redis connection failed: {e}")
+                self._redis = None
+        return self._redis
+
+    def _build_queues(self):
+        """构建监听队列列表（按优先级排序）"""
+        queues = []
+        if self.worker_id:
+            queues.append(f"rpa:worker:{self.worker_id}")
+        if self.role == "admin":
+            for r in self.ALL_ROLES:
+                queues.append(f"rpa:role:{r}")
+        elif self.role:
+            queues.append(f"rpa:role:{self.role}")
+        for sid in self.script_ids:
+            queues.append(f"rpa:script:{sid}")
+        return queues
+
+    def wait_for_task(self, timeout=0):
+        """等待任务（BRPOP 阻塞）"""
+        r = self._get_redis()
+        if r is None:
+            return None
+
+        queues = self._build_queues()
+        if not queues:
+            self.print_fn("[RedisListener] No queues configured")
+            return None
+
+        self.print_fn(f"[RedisListener] BRPOP waiting on {len(queues)} queues...")
+
+        try:
+            result = r.brpop(queues, timeout=timeout)
+            if result:
+                queue_name, payload = result
+                task = json.loads(payload)
+                self.print_fn(
+                    f"[RedisListener] Task received from {queue_name}: "
+                    f"taskId={task.get('taskId')}, scriptId={task.get('scriptId')}"
+                )
+                return {
+                    "task_id": task.get("taskId"),
+                    "node_id": task.get("nodeId"),
+                    "script_id": task.get("scriptId"),
+                    "params": task.get("params", {}),
+                    "callback_url": task.get("callbackUrl"),
+                    "source": "redis",
+                    "queue": queue_name,
+                    "file_path": None,
+                }
+            return None
+        except Exception as e:
+            self.print_fn(f"[RedisListener] BRPOP error: {e}")
+            self._redis = None
+            return None
+
+    def close(self):
+        """关闭连接"""
+        if self._redis:
+            self._redis.close()
+            self._redis = None
+
+
 # ========== 核心流程函数 ==========
 
 def wait_for_task(redis_listener, timeout=0, print_fn=None):
