@@ -74,7 +74,9 @@ class RedisTaskListener:
             self.print_fn("[RedisListener] No queues configured")
             return None
 
-        self.print_fn(f"[RedisListener] BRPOP waiting on {len(queues)} queues...")
+        if not getattr(self, '_logged_waiting', False):
+            self.print_fn(f"[RedisListener] BRPOP waiting on {len(queues)} queues: {queues}")
+            self._logged_waiting = True
 
         try:
             result = r.brpop(queues, timeout=timeout)
