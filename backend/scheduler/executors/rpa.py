@@ -42,27 +42,24 @@ class RpaExecutor(NodeExecutor):
         if not script_id:
             return Result(data={}, success=False, error="Missing required field: config.script")
 
-        routing = config.get("routing")
-
-        # 优先 Redis 派发
-        if routing and routing.get("strategy"):
-            dispatched = await self._dispatch_redis(
-                task_id, node_id, script_id, inputs, routing
+        # 优先 Redis 派发（发到在线 worker 队列）
+        dispatched = await self._dispatch_redis(
+            task_id, node_id, script_id, inputs
+        )
+        if dispatched:
+            return Waiting(
+                wait_type="callback",
+                message=f"RPA task dispatched via Redis: {script_id}"
             )
-            if dispatched:
-                return Waiting(
-                    wait_type="callback",
-                    message=f"RPA task dispatched via Redis: {script_id}"
-                )
-            logger.warning(f"Redis dispatch failed, falling back to file: {script_id}")
 
+        logger.warning(f"Redis dispatch failed, falling back to file: {script_id}")
         # 降级为文件系统派发
         return await self._dispatch_file(task_id, node_id, script_id, inputs)
 
     async def _dispatch_redis(
-        self, task_id, node_id, script_id, inputs, routing
+        self, task_id, node_id, script_id, inputs
     ) -> bool:
-        """通过 Redis 派发任务"""
+        """通过 Redis 派发任务到在线 worker"""
         try:
             from db.redis import redis_available
             from scheduler.integration.redis_dispatcher import redis_dispatcher
@@ -75,7 +72,6 @@ class RpaExecutor(NodeExecutor):
                 node_id=node_id,
                 script_id=script_id,
                 params=inputs,
-                routing=routing,
             )
         except Exception as e:
             logger.error(f"Redis dispatch error: {e}")

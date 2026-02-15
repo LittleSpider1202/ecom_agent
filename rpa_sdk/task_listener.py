@@ -38,13 +38,9 @@ class RedisTaskListener:
     admin 角色监听所有角色队列。
     """
 
-    ALL_ROLES = ["finance", "operations", "customer_service", "warehouse", "content"]
-
-    def __init__(self, redis_url, worker_id=None, role=None, script_ids=None, print_fn=None):
+    def __init__(self, redis_url, worker_id=None, print_fn=None):
         self.redis_url = redis_url
         self.worker_id = worker_id
-        self.role = role
-        self.script_ids = script_ids or []
         self.print_fn = print_fn or print
         self._redis = None
 
@@ -62,18 +58,10 @@ class RedisTaskListener:
         return self._redis
 
     def _build_queues(self):
-        """构建监听队列列表（按优先级排序）"""
-        queues = []
+        """构建监听队列列表"""
         if self.worker_id:
-            queues.append(f"rpa:worker:{self.worker_id}")
-        if self.role == "admin":
-            for r in self.ALL_ROLES:
-                queues.append(f"rpa:role:{r}")
-        elif self.role:
-            queues.append(f"rpa:role:{self.role}")
-        for sid in self.script_ids:
-            queues.append(f"rpa:script:{sid}")
-        return queues
+            return [f"rpa:worker:{self.worker_id}"]
+        return []
 
     def wait_for_task(self, timeout=0):
         """等待任务（BRPOP 阻塞）"""
@@ -301,13 +289,10 @@ def main(args):
     worker_client.start_heartbeat_loop()
     xprint(f"[Worker] 已连接 worker_id={worker_client.worker_id}")
 
-    # 2. Redis 队列监听
-    role = worker_client.worker_info.get("role") if worker_client.worker_info else None
+    # 2. Redis 队列监听（只监听自己的 worker 队列）
     redis_listener = RedisTaskListener(
         redis_url=redis_url,
         worker_id=worker_client.worker_id,
-        role=role,
-        script_ids=SCRIPT_IDS,
         print_fn=xprint,
     )
     xprint("[Redis] 队列监听已启用")

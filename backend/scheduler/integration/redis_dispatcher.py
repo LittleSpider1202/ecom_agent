@@ -1,4 +1,4 @@
-"""Redis 任务派发器 - 三层队列路由"""
+"""Redis 任务派发器 - 派发到指定 Worker 队列"""
 import json
 import logging
 from datetime import datetime
@@ -11,12 +11,10 @@ logger = logging.getLogger(__name__)
 
 
 class RedisDispatcher:
-    """Redis 任务派发 - 三层队列路由
+    """Redis 任务派发
 
-    队列层级：
-    - rpa:worker:{worker_id}   点对点（指定机器）
-    - rpa:role:{role}          角色竞争（同角色任意机器抢）
-    - rpa:script:{script_id}   能力匹配（装了该脚本的机器抢）
+    当前策略：所有任务派发到指定 worker 的队列。
+    如果未指定 worker，自动选择第一个在线的 worker。
     """
 
     async def dispatch(
@@ -25,16 +23,16 @@ class RedisDispatcher:
         node_id: str,
         script_id: str,
         params: dict,
-        routing: Optional[dict] = None,
+        worker_id: Optional[int] = None,
     ) -> bool:
-        """派发任务到 Redis 队列
+        """派发任务到 Worker 的 Redis 队列
 
         Args:
             task_id: 任务 ID
             node_id: 节点 ID
             script_id: 脚本名称
             params: 脚本参数
-            routing: 路由配置 {strategy: worker|role|script, target: str}
+            worker_id: 指定 worker（不指定则自动选择在线 worker）
 
         Returns:
             bool: 是否派发成功
@@ -42,6 +40,14 @@ class RedisDispatcher:
         redis = await get_redis()
         if redis is None:
             return False
+
+        # 确定目标 worker
+        target_worker_id = worker_id or await self._find_online_worker()
+        if target_worker_id is None:
+            logger.warning("No online worker found, cannot dispatch")
+            return False
+
+        queue = f"rpa:worker:{target_worker_id}"
 
         payload = json.dumps(
             {
@@ -55,30 +61,31 @@ class RedisDispatcher:
             ensure_ascii=False,
         )
 
-        strategy = "script"
-        target = script_id
-        if routing:
-            strategy = routing.get("strategy", "script")
-            target = routing.get("target", script_id)
-
-        queue = self._resolve_queue(strategy, target, script_id)
-
         try:
             await redis.lpush(queue, payload)
-            logger.info(f"Redis dispatch: queue={queue} task={task_id} node={node_id}")
+            logger.info(
+                f"Redis dispatch: queue={queue} task={task_id} node={node_id} script={script_id}"
+            )
             return True
         except Exception as e:
             logger.error(f"Redis dispatch failed: {e}")
             return False
 
-    def _resolve_queue(self, strategy: str, target: str, script_id: str) -> str:
-        """根据策略确定目标队列"""
-        if strategy == "worker":
-            return f"rpa:worker:{target}"
-        elif strategy == "role":
-            return f"rpa:role:{target}"
-        else:
-            return f"rpa:script:{script_id}"
+    async def _find_online_worker(self) -> Optional[int]:
+        """查找第一个在线的 worker"""
+        try:
+            import aiosqlite
+            from db.database import DB_PATH
+            async with aiosqlite.connect(DB_PATH) as db:
+                cursor = await db.execute(
+                    "SELECT id FROM workers WHERE status IN ('online', 'busy') "
+                    "ORDER BY last_heartbeat DESC LIMIT 1"
+                )
+                row = await cursor.fetchone()
+                return row[0] if row else None
+        except Exception as e:
+            logger.error(f"Failed to find online worker: {e}")
+            return None
 
 
 redis_dispatcher = RedisDispatcher()
