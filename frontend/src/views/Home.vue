@@ -27,6 +27,14 @@
                 <el-icon><Coin /></el-icon>
                 存储管理
               </el-dropdown-item>
+              <el-dropdown-item @click="$router.push('/workers')">
+                <el-icon><Monitor /></el-icon>
+                Worker 管理
+              </el-dropdown-item>
+              <el-dropdown-item @click="$router.push('/marketplace')">
+                <el-icon><Goods /></el-icon>
+                脚本市场
+              </el-dropdown-item>
               <el-dropdown-item divided>
                 <el-icon><SwitchButton /></el-icon>
                 退出登录
@@ -61,6 +69,14 @@
                 <div class="task-item" @click="$router.push('/storage')">
                   <el-icon><Coin /></el-icon>
                   <span class="nav-text">存储管理</span>
+                </div>
+                <div class="task-item" @click="$router.push('/workers')">
+                  <el-icon><Monitor /></el-icon>
+                  <span class="nav-text">Worker 管理</span>
+                </div>
+                <div class="task-item" @click="$router.push('/marketplace')">
+                  <el-icon><Goods /></el-icon>
+                  <span class="nav-text">脚本市场</span>
                 </div>
               </div>
             </el-collapse-transition>

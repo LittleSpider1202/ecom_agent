@@ -12,6 +12,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.base import BaseHTTPMiddleware
 import uvicorn
 
+import os
 from config import API_PREFIX
 
 logging.basicConfig(
@@ -29,8 +30,12 @@ from api.scripts import router as scripts_router
 from api.ws import router as ws_router
 from api.utils import router as utils_router
 from api.storage import router as storage_router
+from api.workers import router as workers_router
+from api.marketplace import router as marketplace_router
 from flows.registry import load_flows
 from scheduler.job_scheduler import job_scheduler
+from scheduler.worker_monitor import check_worker_heartbeats
+from db.redis import init_redis, close_redis
 
 app = FastAPI(
     title="电商自动化代理 API",
@@ -86,10 +91,14 @@ class AccessLogMiddleware(BaseHTTPMiddleware):
         return response
 
 
-# CORS 配置（必须在 AccessLog 之前注册，这样 CORS 头先处理）
+# CORS 配置（通过 CORS_ORIGINS 环境变量配置，逗号分隔）
+CORS_ORIGINS = os.environ.get(
+    "CORS_ORIGINS",
+    "http://localhost:3000,http://127.0.0.1:3000"
+).split(",")
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],
+    allow_origins=CORS_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -106,6 +115,8 @@ app.include_router(scripts_router, prefix=API_PREFIX)
 app.include_router(ws_router, prefix=API_PREFIX)
 app.include_router(utils_router, prefix=API_PREFIX)
 app.include_router(storage_router, prefix=API_PREFIX)
+app.include_router(workers_router, prefix=API_PREFIX)
+app.include_router(marketplace_router, prefix=API_PREFIX)
 
 
 @app.on_event("startup")
@@ -118,14 +129,26 @@ async def startup():
     # 启动任务调度器
     job_scheduler.start()
     await job_scheduler.load_scheduled_tasks()
-    print("Job scheduler started")
+    # 注册 Worker 心跳监控（每 60s 检查一次）
+    from apscheduler.triggers.interval import IntervalTrigger
+    job_scheduler.scheduler.add_job(
+        check_worker_heartbeats,
+        IntervalTrigger(seconds=60),
+        id="worker_heartbeat_monitor",
+        replace_existing=True,
+    )
+    print("Job scheduler started (with worker heartbeat monitor)")
+    # 初始化 Redis（可选，失败不影响启动）
+    redis_ok = await init_redis()
+    print(f"Redis: {'connected' if redis_ok else 'disabled (fallback to file dispatch)'}")
 
 
 @app.on_event("shutdown")
 async def shutdown():
     """应用关闭时清理"""
     job_scheduler.stop()
-    print("Job scheduler stopped")
+    await close_redis()
+    print("Job scheduler stopped, Redis closed")
 
 
 @app.get("/")

@@ -78,6 +78,21 @@ async def init_db():
             )
         """)
 
+        # 为 rpa_scripts 表添加 marketplace 列（兼容旧表）
+        for col, default in [
+            ("category", "'general'"),
+            ("version", "'1.0.0'"),
+            ("is_published", "0"),
+        ]:
+            try:
+                await db.execute(f"ALTER TABLE rpa_scripts ADD COLUMN {col} TEXT DEFAULT {default}")
+            except Exception:
+                pass  # 列已存在
+        try:
+            await db.execute("ALTER TABLE rpa_scripts ADD COLUMN install_count INTEGER DEFAULT 0")
+        except Exception:
+            pass  # 列已存在
+
         # 创建数据源配置表（支持多实例）
         # 迁移：旧表用 TEXT PK，新表用 INTEGER AUTOINCREMENT
         cursor = await db.execute(
@@ -99,6 +114,52 @@ async def init_db():
             )
         """)
 
+        # Worker 管理表（必须在 worker_scripts 之前创建）
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS workers (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL,
+                hostname TEXT,
+                machine_id TEXT UNIQUE,
+                role TEXT,
+                capabilities TEXT DEFAULT '[]',
+                status TEXT DEFAULT 'offline',
+                last_heartbeat TEXT,
+                api_key TEXT UNIQUE,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )
+        """)
+
+        # Worker-脚本 安装关系表
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS worker_scripts (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                worker_id INTEGER NOT NULL,
+                script_id TEXT NOT NULL,
+                installed_at TEXT NOT NULL,
+                version TEXT,
+                FOREIGN KEY (worker_id) REFERENCES workers(id),
+                FOREIGN KEY (script_id) REFERENCES rpa_scripts(id),
+                UNIQUE(worker_id, script_id)
+            )
+        """)
+
+        # 连接码表
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS connect_codes (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                code TEXT NOT NULL UNIQUE,
+                worker_name TEXT,
+                role TEXT,
+                is_used INTEGER DEFAULT 0,
+                used_by_worker_id INTEGER,
+                expires_at TEXT,
+                created_at TEXT NOT NULL,
+                FOREIGN KEY (used_by_worker_id) REFERENCES workers(id)
+            )
+        """)
+
         # 创建索引
         await db.execute("CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status)")
         await db.execute("CREATE INDEX IF NOT EXISTS idx_tasks_flow_id ON tasks(flow_id)")
@@ -106,6 +167,9 @@ async def init_db():
         await db.execute("CREATE INDEX IF NOT EXISTS idx_task_nodes_task_id ON task_nodes(task_id)")
         await db.execute("CREATE INDEX IF NOT EXISTS idx_events_task_id ON events(task_id)")
         await db.execute("CREATE INDEX IF NOT EXISTS idx_events_type ON events(event_type)")
+        await db.execute("CREATE INDEX IF NOT EXISTS idx_workers_status ON workers(status)")
+        await db.execute("CREATE INDEX IF NOT EXISTS idx_workers_api_key ON workers(api_key)")
+        await db.execute("CREATE INDEX IF NOT EXISTS idx_connect_codes_code ON connect_codes(code)")
 
         await db.commit()
 

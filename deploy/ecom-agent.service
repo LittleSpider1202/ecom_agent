@@ -1,0 +1,19 @@
+[Unit]
+Description=ecom_agent Backend API
+After=network.target redis-server.service
+
+[Service]
+Type=simple
+User=ecom
+Group=ecom
+WorkingDirectory=/opt/ecom_agent/backend
+EnvironmentFile=/opt/ecom_agent/backend/.env
+ExecStart=/opt/ecom_agent/venv/bin/uvicorn main:app --host 127.0.0.1 --port 8000
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=ecom-agent
+
+[Install]
+WantedBy=multi-user.target

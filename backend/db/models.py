@@ -3,6 +3,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Optional
 from enum import Enum
+from typing import List
 import json
 
 
@@ -204,4 +205,98 @@ class RpaScript:
             "retryCount": self.retry_count,
             "createdAt": self.created_at,
             "updatedAt": self.updated_at
+        }
+
+
+class WorkerStatus(str, Enum):
+    """Worker 状态"""
+    ONLINE = "online"
+    OFFLINE = "offline"
+    BUSY = "busy"
+
+
+@dataclass
+class Worker:
+    """Worker 机器模型"""
+    id: int
+    name: str
+    hostname: Optional[str]
+    machine_id: Optional[str]
+    role: Optional[str]
+    capabilities: List[str]
+    status: str
+    last_heartbeat: Optional[str]
+    api_key: Optional[str]
+    created_at: str
+    updated_at: str
+
+    @classmethod
+    def from_row(cls, row) -> "Worker":
+        return cls(
+            id=row["id"],
+            name=row["name"],
+            hostname=row["hostname"],
+            machine_id=row["machine_id"],
+            role=row["role"],
+            capabilities=json.loads(row["capabilities"]) if row["capabilities"] else [],
+            status=row["status"],
+            last_heartbeat=row["last_heartbeat"],
+            api_key=row["api_key"],
+            created_at=row["created_at"],
+            updated_at=row["updated_at"],
+        )
+
+    def to_dict(self, include_api_key: bool = False) -> dict:
+        d = {
+            "id": self.id,
+            "name": self.name,
+            "hostname": self.hostname,
+            "machineId": self.machine_id,
+            "role": self.role,
+            "capabilities": self.capabilities,
+            "status": self.status,
+            "lastHeartbeat": self.last_heartbeat,
+            "createdAt": self.created_at,
+            "updatedAt": self.updated_at,
+        }
+        if include_api_key:
+            d["apiKey"] = self.api_key
+        return d
+
+
+@dataclass
+class ConnectCode:
+    """连接码模型"""
+    id: int
+    code: str
+    worker_name: Optional[str]
+    role: Optional[str]
+    is_used: bool
+    used_by_worker_id: Optional[int]
+    expires_at: Optional[str]
+    created_at: str
+
+    @classmethod
+    def from_row(cls, row) -> "ConnectCode":
+        return cls(
+            id=row["id"],
+            code=row["code"],
+            worker_name=row["worker_name"],
+            role=row["role"],
+            is_used=bool(row["is_used"]),
+            used_by_worker_id=row["used_by_worker_id"],
+            expires_at=row["expires_at"],
+            created_at=row["created_at"],
+        )
+
+    def to_dict(self) -> dict:
+        return {
+            "id": self.id,
+            "code": self.code,
+            "workerName": self.worker_name,
+            "role": self.role,
+            "isUsed": self.is_used,
+            "usedByWorkerId": self.used_by_worker_id,
+            "expiresAt": self.expires_at,
+            "createdAt": self.created_at,
         }

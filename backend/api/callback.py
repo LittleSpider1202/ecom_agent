@@ -1,6 +1,6 @@
 """回调 API - 接收外部系统的回调"""
 import logging
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Header
 from pydantic import BaseModel, Field
 from typing import Any, Optional
 
@@ -41,7 +41,11 @@ class HumanActionRequest(BaseModel):
 
 
 @router.post("/rpa/{node_id}")
-async def rpa_callback(node_id: str, req: RpaCallbackRequest):
+async def rpa_callback(
+    node_id: str,
+    req: RpaCallbackRequest,
+    x_worker_key: Optional[str] = Header(None, alias="X-Worker-Key"),
+):
     """
     RPA 回调接口
 

@@ -38,6 +38,18 @@ const routes = [
     name: 'Storage',
     component: () => import('@/views/Storage.vue'),
     meta: { title: '存储管理' }
+  },
+  {
+    path: '/workers',
+    name: 'Workers',
+    component: () => import('@/views/Workers.vue'),
+    meta: { title: 'Worker 管理' }
+  },
+  {
+    path: '/marketplace',
+    name: 'Marketplace',
+    component: () => import('@/views/Marketplace.vue'),
+    meta: { title: '脚本市场' }
   }
 ]
 

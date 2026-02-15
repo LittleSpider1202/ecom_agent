@@ -1,270 +1,471 @@
-# task_listener.py - 影刀任务轮询模块
-# 每个影刀脚本引入此模块，实现任务监听和回调
+# task_listener.py - 影刀任务监听模块
+# Worker 通过 Redis 队列从后端接收任务，执行后 HTTP 回调结果
 #
-# 文件协议格式:
+# 任务消息格式（Redis 队列 payload）:
 # {
-#     "taskId": 1,                    # 任务ID（整数）
-#     "nodeId": "1_1",                # 节点ID（格式: task_id_node_index）
-#     "scriptId": "发送开票清单",      # 流程名称（用于匹配和动态调用子流程）
-#     "params": {...},                # 脚本参数
+#     "taskId": 1,
+#     "nodeId": "1_1",
+#     "scriptId": "开票-整理excel",
+#     "params": {...},
 #     "dispatchedAt": "2026-02-06 18:15:27",
-#     "callbackUrl": "http://localhost:8000/api/callback/rpa/1_1"
+#     "callbackUrl": "http://192.168.3.100:8088/api/callback/rpa/1_1"
 # }
 
 import os
 import json
 import time
+import threading
 import urllib.request
 
-# 配置（支持环境变量覆盖）
-TASK_DIR = os.environ.get("RPA_TASK_DIR", "D:/ai/ecom_tools/ecom_agent/backend/data/rpa_tasks")
-CALLBACK_BASE = os.environ.get("RPA_CALLBACK_BASE", "http://localhost:8000/api/callback/rpa")
-POLL_INTERVAL = int(os.environ.get("RPA_POLL_INTERVAL", "1"))  # 轮询间隔（秒）
-CALLBACK_TIMEOUT = int(os.environ.get("RPA_CALLBACK_TIMEOUT", "10"))  # 回调超时（秒）
+# ========== 配置 ==========
+SERVER_URL = "http://192.168.3.100:8088"
+REDIS_URL = "redis://192.168.3.100:6379/0"
+
+SCRIPT_IDS = [
+    "开票-整理excel",
+    "开票-录入系统",
+    "采集作品-抖音",
+]
 
 
-def wait_for_task(script_ids, timeout=0, print_fn=None):
+# ========== Redis 队列消费 ==========
+
+class RedisTaskListener:
+    """Redis 队列任务消费器
+
+    使用 BRPOP 从多个队列监听任务。
+    队列优先级：worker > role > script。
+    admin 角色监听所有角色队列。
     """
-    轮询等待任务
+
+    ALL_ROLES = ["finance", "operations", "customer_service", "warehouse", "content"]
+
+    def __init__(self, redis_url, worker_id=None, role=None, script_ids=None, print_fn=None):
+        self.redis_url = redis_url
+        self.worker_id = worker_id
+        self.role = role
+        self.script_ids = script_ids or []
+        self.print_fn = print_fn or print
+        self._redis = None
+
+    def _get_redis(self):
+        """懒初始化 Redis 连接"""
+        if self._redis is None:
+            try:
+                import redis as redis_lib
+                self._redis = redis_lib.from_url(self.redis_url, decode_responses=True)
+                self._redis.ping()
+                self.print_fn(f"[RedisListener] Redis connected: {self.redis_url}")
+            except Exception as e:
+                self.print_fn(f"[RedisListener] Redis connection failed: {e}")
+                self._redis = None
+        return self._redis
+
+    def _build_queues(self):
+        """构建监听队列列表（按优先级排序）"""
+        queues = []
+        if self.worker_id:
+            queues.append(f"rpa:worker:{self.worker_id}")
+        if self.role == "admin":
+            for r in self.ALL_ROLES:
+                queues.append(f"rpa:role:{r}")
+        elif self.role:
+            queues.append(f"rpa:role:{self.role}")
+        for sid in self.script_ids:
+            queues.append(f"rpa:script:{sid}")
+        return queues
+
+    def wait_for_task(self, timeout=0):
+        """等待任务（BRPOP 阻塞）"""
+        r = self._get_redis()
+        if r is None:
+            return None
+
+        queues = self._build_queues()
+        if not queues:
+            self.print_fn("[RedisListener] No queues configured")
+            return None
+
+        self.print_fn(f"[RedisListener] BRPOP waiting on {len(queues)} queues...")
+
+        try:
+            result = r.brpop(queues, timeout=timeout)
+            if result:
+                queue_name, payload = result
+                task = json.loads(payload)
+                self.print_fn(
+                    f"[RedisListener] Task received from {queue_name}: "
+                    f"taskId={task.get('taskId')}, scriptId={task.get('scriptId')}"
+                )
+                return {
+                    "task_id": task.get("taskId"),
+                    "node_id": task.get("nodeId"),
+                    "script_id": task.get("scriptId"),
+                    "params": task.get("params", {}),
+                    "callback_url": task.get("callbackUrl"),
+                    "source": "redis",
+                    "queue": queue_name,
+                    "file_path": None,
+                }
+            return None
+        except Exception as e:
+            self.print_fn(f"[RedisListener] BRPOP error: {e}")
+            self._redis = None
+            return None
+
+    def close(self):
+        """关闭连接"""
+        if self._redis:
+            self._redis.close()
+            self._redis = None
+
+
+# ========== 核心流程函数 ==========
+
+def wait_for_task(redis_listener, timeout=0, print_fn=None):
+    """
+    从 Redis 队列等待任务（BRPOP 阻塞）
 
     Args:
-        script_ids: str 或 list，支持的流程名称列表（如 ["发送开票清单", "下载发票"]）
+        redis_listener: RedisTaskListener 实例
         timeout: 超时秒数，0 表示永久等待
         print_fn: 打印函数（影刀用 xbot.print）
 
     Returns:
-        dict: {
-            "task_id": int,        # 任务ID
-            "node_id": str,        # 节点ID（如 "1_1"）
-            "script_id": str,      # 流程名称
-            "params": dict,        # 脚本参数
-            "callback_url": str,   # 回调URL
-            "file_path": str       # 原始文件路径（用于 dynamic_call）
-        }
+        dict: 任务信息 {task_id, node_id, script_id, params, callback_url}
         None: 超时
     """
-    if isinstance(script_ids, str):
-        script_ids = [script_ids]
-
-    start = time.time()
     log = print_fn or print
-
-    log(f"[TaskListener] 开始监听任务，支持流程: {script_ids}")
-
-    # 确保目录存在
-    if not os.path.exists(TASK_DIR):
-        os.makedirs(TASK_DIR)
+    start = time.time()
 
     while True:
-        # 扫描任务目录
-        try:
-            for filename in os.listdir(TASK_DIR):
-                if not filename.endswith('.json'):
-                    continue
-
-                filepath = os.path.join(TASK_DIR, filename)
-                try:
-                    with open(filepath, 'r', encoding='utf-8') as f:
-                        task = json.load(f)
-
-                    script_id = task.get('scriptId')
-
-                    # 匹配流程名称
-                    if script_id in script_ids:
-                        # 删除文件（已领取）
-                        os.remove(filepath)
-                        log(f"[TaskListener] 领取任务: {task.get('taskId')}, 流程: {script_id}")
-
-                        return {
-                            "task_id": task.get("taskId"),
-                            "node_id": task.get("nodeId"),
-                            "script_id": script_id,
-                            "params": task.get("params", {}),
-                            "callback_url": task.get("callbackUrl"),
-                            "file_path": filepath
-                        }
-                except Exception as e:
-                    log(f"[TaskListener] 读取文件失败: {filename}, {e}")
-                    continue
-        except Exception as e:
-            log(f"[TaskListener] 扫描目录失败: {e}")
-
-        # 检查超时
+        # BRPOP 阻塞等待，每轮最多 5 秒
+        brpop_timeout = 5 if timeout == 0 else min(5, max(1, timeout - int(time.time() - start)))
+        task = redis_listener.wait_for_task(timeout=brpop_timeout)
+        if task:
+            return task
         if timeout > 0 and (time.time() - start) > timeout:
-            log(f"[TaskListener] 等待超时 ({timeout}秒)")
+            log(f"[超时] {timeout}秒")
             return None
 
-        time.sleep(POLL_INTERVAL)
 
-
-def callback(node_id, task_id, success=True, result=None, error=None, print_fn=None):
+def callback(node_id, task_id, success=True, result=None, error=None,
+             print_fn=None, callback_url=None, api_key=None):
     """
-    执行完成后回调
+    执行完成后 HTTP 回调
 
     Args:
-        node_id: 节点 ID（格式: task_id_node_index，如 "1_1"）
+        node_id: 节点 ID（如 "1_1"）
         task_id: 任务 ID
         success: 是否成功
         result: 返回结果 dict
         error: 错误信息
         print_fn: 打印函数
+        callback_url: 回调 URL（从任务消息中获取）
+        api_key: Worker API Key（用于身份识别）
 
     Returns:
-        dict: 回调响应
-        None: 回调失败
+        dict: 回调响应 / None: 回调失败
     """
     log = print_fn or print
 
-    url = f"{CALLBACK_BASE}/{node_id}"
+    if not callback_url:
+        log(f"[回调] 失败: 缺少 callbackUrl")
+        return None
+
     data = {
         "taskId": task_id,
         "nodeId": node_id,
         "success": success,
         "result": result or {},
-        "error": error
+        "error": error,
     }
 
-    log(f"[TaskListener] 回调: {url}, success={success}")
+    headers = {"Content-Type": "application/json"}
+    if api_key:
+        headers["X-Worker-Key"] = api_key
 
     req = urllib.request.Request(
-        url,
+        callback_url,
         data=json.dumps(data).encode('utf-8'),
-        headers={"Content-Type": "application/json"},
-        method="POST"
+        headers=headers,
+        method="POST",
     )
 
     try:
-        with urllib.request.urlopen(req, timeout=CALLBACK_TIMEOUT) as resp:
-            resp_data = json.loads(resp.read().decode('utf-8'))
-            log(f"[TaskListener] 回调成功")
-            return resp_data
+        opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+        with opener.open(req, timeout=10) as resp:
+            log("[回调] 成功")
+            return json.loads(resp.read().decode('utf-8'))
     except Exception as e:
-        log(f"[TaskListener] 回调失败: {e}")
+        log(f"[回调] 失败: {e}")
         return None
 
 
-class TaskRunner:
+def execute_task(task, print_fn):
     """
-    任务运行器 - 封装完整的轮询-执行-回调流程
+    执行任务：调用影刀 dynamic_call 子流程
 
-    支持两种模式：
-    1. 传统模式：注册 handler 函数处理每个流程
-    2. 动态调用模式：使用 dynamic_call.process1 调用影刀子流程
+    Returns:
+        (success, result_dict, error_str)
     """
+    from xbot_extensions import dynamic_call
+    log = print_fn or print
+    script_id = task["script_id"]
+    params = task["params"]
+    log(f"[执行] {script_id}")
+    try:
+        result = dynamic_call.process1(script_id, params, task.get("file_path", ""))
+        # 确保 result 是可序列化的字典
+        if result is None:
+            result_dict = {}
+        elif isinstance(result, dict):
+            result_dict = result
+        elif hasattr(result, '__dict__'):
+            result_dict = dict(result.__dict__)
+        elif hasattr(result, '_asdict'):
+            result_dict = result._asdict()
+        else:
+            result_dict = {"result": str(result)}
+        log(f"[完成] {result_dict}")
+        return True, result_dict, None
+    except Exception as e:
+        log(f"[失败] {e}")
+        return False, {}, str(e)
 
-    def __init__(self, script_ids, print_fn=None, use_dynamic_call=False):
-        """
-        Args:
-            script_ids: str 或 list，支持的流程名称（如 ["发送开票清单", "下载发票"]）
-            print_fn: 打印函数（影刀用 xbot.print）
-            use_dynamic_call: 是否使用动态调用模式（调用影刀子流程）
-        """
-        self.script_ids = script_ids if isinstance(script_ids, list) else [script_ids]
-        self.print_fn = print_fn or print
-        self.handlers = {}  # script_id -> handler function
-        self.use_dynamic_call = use_dynamic_call
 
-    def register(self, script_id, handler):
-        """
-        注册流程处理函数
+def process_task(task, print_fn, api_key=None):
+    """执行任务 + 回调"""
+    success, result, error = execute_task(task, print_fn)
+    callback(
+        task["node_id"], task["task_id"],
+        success=success, result=result, error=error,
+        print_fn=print_fn,
+        callback_url=task.get("callback_url"),
+        api_key=api_key,
+    )
+    return success
 
-        Args:
-            script_id: 流程名称（如 "发送开票清单"）
-            handler: 处理函数，签名 handler(params) -> result_dict
-        """
-        self.handlers[script_id] = handler
-        if script_id not in self.script_ids:
-            self.script_ids.append(script_id)
 
-    def run_once(self, timeout=60):
-        """
-        执行一次：等待任务 -> 执行 -> 回调
-
-        Args:
-            timeout: 等待超时秒数
-
-        Returns:
-            bool: 是否成功执行了任务
-        """
-        task = wait_for_task(self.script_ids, timeout=timeout, print_fn=self.print_fn)
-
-        if not task:
-            return False
-
-        script_id = task['script_id']
-        node_id = task['node_id']
-        task_id = task['task_id']
-
-        # 执行处理
+def run_forever(redis_listener, script_ids, print_fn, api_key=None):
+    """永久运行模式：循环从 Redis 领取任务并执行"""
+    log = print_fn or print
+    while True:
         try:
-            if self.use_dynamic_call:
-                # 动态调用模式：使用影刀的 dynamic_call.process1
-                self.print_fn(f"[TaskRunner] 动态调用子流程: {script_id}")
-                result = self._invoke_subprocess(script_id, task['params'], task['file_path'])
-            else:
-                # 传统模式：使用注册的 handler
-                handler = self.handlers.get(script_id)
-                if not handler:
-                    self.print_fn(f"[TaskRunner] 未找到处理函数: {script_id}")
-                    callback(
-                        node_id, task_id,
-                        success=False, error=f"未注册的流程: {script_id}",
-                        print_fn=self.print_fn
-                    )
-                    return False
-
-                self.print_fn(f"[TaskRunner] 执行流程: {script_id}")
-                result = handler(task['params'])
-
-            callback(
-                node_id, task_id,
-                success=True, result=result or {},
-                print_fn=self.print_fn
-            )
-            return True
-
+            task = wait_for_task(redis_listener, timeout=0, print_fn=log)
+            if task:
+                process_task(task, log, api_key=api_key)
+        except KeyboardInterrupt:
+            log("[退出]")
+            break
         except Exception as e:
-            self.print_fn(f"[TaskRunner] 执行失败: {e}")
-            callback(
-                node_id, task_id,
-                success=False, error=str(e),
-                print_fn=self.print_fn
-            )
+            log(f"[异常] {e}")
+            time.sleep(5)
+
+
+# ========== 影刀入口 ==========
+
+def main(args):
+    """影刀脚本入口
+
+    Args（影刀参数）:
+        mode: "forever"（默认）/ "once"
+        connect_code: 连接码（首次注册用，如 "CON-X7K9M2"）
+        server_url: 服务器地址（默认 SERVER_URL）
+        redis_url: Redis 地址（默认 REDIS_URL）
+    """
+    from xbot import print as xprint
+    args = args or {}
+
+    #connect_code = args.get("connect_code", "")
+    #server_url = args.get("server_url", SERVER_URL)
+    #redis_url = args.get("redis_url", REDIS_URL)
+    connect_code = "CON-8VFQBY"
+    server_url = "http://192.168.3.100:8088"
+    redis_url = "redis://192.168.3.100:6379/0"
+    mode = args.get("mode", "forever")
+
+    xprint("=" * 40)
+    xprint("任务调度启动")
+    xprint(f"监听任务: {SCRIPT_IDS}")
+
+    # 1. Worker 连接
+    worker_client = WorkerClient(server_url, print_fn=xprint)
+    if connect_code and not worker_client.is_connected():
+        worker_client.connect(connect_code)
+
+    if not worker_client.is_connected():
+        xprint("[ERROR] Worker 未连接，请提供 connect_code 参数")
+        return
+
+    worker_client.start_heartbeat_loop()
+    xprint(f"[Worker] 已连接 worker_id={worker_client.worker_id}")
+
+    # 2. Redis 队列监听
+    role = worker_client.worker_info.get("role") if worker_client.worker_info else None
+    redis_listener = RedisTaskListener(
+        redis_url=redis_url,
+        worker_id=worker_client.worker_id,
+        role=role,
+        script_ids=SCRIPT_IDS,
+        print_fn=xprint,
+    )
+    xprint("[Redis] 队列监听已启用")
+    xprint("=" * 40)
+
+    # 3. 运行
+    if mode == "once":
+        task = wait_for_task(redis_listener, timeout=60, print_fn=xprint)
+        if task:
+            process_task(task, xprint, api_key=worker_client.api_key)
+    else:
+        run_forever(redis_listener, SCRIPT_IDS, print_fn=xprint, api_key=worker_client.api_key)
+
+    worker_client.stop_heartbeat_loop()
+    xprint("[退出]")
+
+
+# ========== Worker 连接客户端 ==========
+
+class WorkerClient:
+    """Worker 连接和心跳客户端
+
+    首次使用连接码注册，之后从本地 config 文件恢复身份。
+    后台线程定期发送心跳保持在线。
+    """
+
+    def __init__(self, server_url, config_path="worker_config.json", print_fn=None):
+        self.server_url = server_url.rstrip("/")
+        self.config_path = config_path
+        self.print_fn = print_fn or print
+        self.worker_id = None
+        self.api_key = None
+        self.worker_info = None
+        self._heartbeat_stop = threading.Event()
+        self._heartbeat_thread = None
+        self._load_config()
+
+    def _load_config(self):
+        """从本地文件加载已保存的 worker_id + api_key"""
+        if os.path.exists(self.config_path):
+            try:
+                with open(self.config_path, "r", encoding="utf-8") as f:
+                    config = json.load(f)
+                self.worker_id = config.get("worker_id")
+                self.api_key = config.get("api_key")
+                self.server_url = config.get("server_url", self.server_url)
+                self.print_fn(f"[WorkerClient] 已加载配置: worker_id={self.worker_id}")
+            except Exception as e:
+                self.print_fn(f"[WorkerClient] 加载配置失败: {e}")
+
+    def _save_config(self):
+        """保存 worker_id + api_key 到本地文件"""
+        config = {
+            "worker_id": self.worker_id,
+            "api_key": self.api_key,
+            "server_url": self.server_url,
+        }
+        try:
+            with open(self.config_path, "w", encoding="utf-8") as f:
+                json.dump(config, f, ensure_ascii=False, indent=2)
+            self.print_fn(f"[WorkerClient] 配置已保存到 {self.config_path}")
+        except Exception as e:
+            self.print_fn(f"[WorkerClient] 保存配置失败: {e}")
+
+    def is_connected(self):
+        return self.worker_id is not None and self.api_key is not None
+
+    def connect(self, connect_code, hostname=None, machine_id=None):
+        """首次连接：POST /api/workers/connect"""
+        url = f"{self.server_url}/api/workers/connect"
+        payload = {
+            "connectCode": connect_code,
+            "hostname": hostname or os.environ.get("COMPUTERNAME", "unknown"),
+            "machineId": machine_id or self._get_machine_id(),
+        }
+
+        self.print_fn(f"[WorkerClient] 连接中: {url}")
+
+        req = urllib.request.Request(
+            url,
+            data=json.dumps(payload).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+
+        try:
+            opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+            with opener.open(req, timeout=10) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+
+            if data.get("success"):
+                self.worker_id = data["worker"]["id"]
+                self.api_key = data["apiKey"]
+                self.worker_info = data["worker"]
+                self._save_config()
+                self.print_fn(f"[WorkerClient] 连接成功: worker_id={self.worker_id}")
+                return data["worker"]
+            else:
+                self.print_fn(f"[WorkerClient] 连接失败: {data}")
+                return None
+        except Exception as e:
+            self.print_fn(f"[WorkerClient] 连接异常: {e}")
+            return None
+
+    def heartbeat(self, status="online", capabilities=None):
+        """发送心跳: POST /api/workers/{id}/heartbeat"""
+        if not self.is_connected():
             return False
 
-    def _invoke_subprocess(self, script_id, params, file_path):
-        """
-        使用影刀 dynamic_call.process1 调用子流程
+        url = f"{self.server_url}/api/workers/{self.worker_id}/heartbeat"
+        payload = {"status": status}
+        if capabilities is not None:
+            payload["capabilities"] = capabilities
 
-        Args:
-            script_id: 子流程名称（可视化流程的名称）
-            params: 流程参数
-            file_path: 参数文件路径
+        req = urllib.request.Request(
+            url,
+            data=json.dumps(payload).encode("utf-8"),
+            headers={
+                "Content-Type": "application/json",
+                "X-Worker-Key": self.api_key,
+            },
+            method="POST",
+        )
 
-        Returns:
-            dict: 子流程返回结果
-        """
         try:
-            from xbot import dynamic_call
-            # process1(流程名, 流程参数, 参数文件路径)
-            result = dynamic_call.process1(script_id, params, file_path)
-            return result if isinstance(result, dict) else {"result": result}
-        except ImportError:
-            # 非影刀环境，返回模拟结果
-            self.print_fn(f"[TaskRunner] 非影刀环境，模拟执行: {script_id}")
-            return {"message": f"模拟执行 {script_id}", "params": params}
+            opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+            with opener.open(req, timeout=5) as resp:
+                return resp.status == 200
+        except Exception as e:
+            self.print_fn(f"[WorkerClient] 心跳失败: {e}")
+            return False
 
-    def run_forever(self):
-        """
-        永久运行：循环执行任务
-        """
-        self.print_fn(f"[TaskRunner] 启动永久运行模式")
-        while True:
-            try:
-                self.run_once(timeout=0)
-            except KeyboardInterrupt:
-                self.print_fn(f"[TaskRunner] 收到退出信号")
-                break
-            except Exception as e:
-                self.print_fn(f"[TaskRunner] 运行异常: {e}")
-                time.sleep(5)
+    def start_heartbeat_loop(self, interval=30):
+        """启动后台心跳线程"""
+        if self._heartbeat_thread and self._heartbeat_thread.is_alive():
+            return
+
+        self._heartbeat_stop.clear()
+
+        def _loop():
+            while not self._heartbeat_stop.is_set():
+                self.heartbeat()
+                self._heartbeat_stop.wait(interval)
+
+        self._heartbeat_thread = threading.Thread(target=_loop, daemon=True)
+        self._heartbeat_thread.start()
+        self.print_fn(f"[WorkerClient] 心跳线程已启动 (interval={interval}s)")
+
+    def stop_heartbeat_loop(self):
+        """停止心跳线程"""
+        self._heartbeat_stop.set()
+        if self._heartbeat_thread:
+            self._heartbeat_thread.join(timeout=5)
+        self.print_fn("[WorkerClient] 心跳线程已停止")
+
+    def _get_machine_id(self):
+        try:
+            import uuid
+            return str(uuid.getnode())
+        except Exception:
+            return "unknown"

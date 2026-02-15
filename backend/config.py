@@ -22,3 +22,6 @@ RPA_CALLBACK_TIMEOUT = int(os.environ.get("RPA_CALLBACK_TIMEOUT", "600"))  # 回
 
 # 回调 URL 配置
 CALLBACK_BASE_URL = os.environ.get("CALLBACK_BASE_URL", "http://localhost:8000")
+
+# Redis 配置
+REDIS_URL = os.environ.get("REDIS_URL", "redis://localhost:6379/0")
