@@ -3,7 +3,7 @@ import json
 import logging
 import secrets
 import string
-from datetime import datetime, timedelta
+from datetime import datetime
 from fastapi import APIRouter, HTTPException, Header
 from typing import Optional
 
@@ -13,8 +13,6 @@ from schemas.worker import ConnectCodeCreate, WorkerConnect, WorkerHeartbeat
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/workers", tags=["workers"])
-
-CONNECT_CODE_EXPIRY_HOURS = 24
 
 
 def _generate_connect_code() -> str:
@@ -34,13 +32,11 @@ async def create_connect_code(req: ConnectCodeCreate):
     """生成一次性连接码"""
     code = _generate_connect_code()
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    expires_at = (datetime.now() + timedelta(hours=CONNECT_CODE_EXPIRY_HOURS)).strftime("%Y-%m-%d %H:%M:%S")
-
     async with transaction() as db:
         await db.execute(
-            """INSERT INTO connect_codes (code, worker_name, role, expires_at, created_at)
-               VALUES (?, ?, ?, ?, ?)""",
-            (code, req.worker_name, req.role, expires_at, now),
+            """INSERT INTO connect_codes (code, worker_name, role, created_at)
+               VALUES (?, ?, ?, ?)""",
+            (code, req.worker_name, req.role, now),
         )
         cursor = await db.execute("SELECT * FROM connect_codes WHERE code = ?", (code,))
         row = await cursor.fetchone()
@@ -84,9 +80,6 @@ async def worker_connect(req: WorkerConnect):
 
         if code_obj.is_used:
             raise HTTPException(status_code=400, detail="连接码已使用")
-
-        if code_obj.expires_at and code_obj.expires_at < now:
-            raise HTTPException(status_code=400, detail="连接码已过期")
 
         # 2. 检查 machine_id 是否已注册
         worker_row = None
