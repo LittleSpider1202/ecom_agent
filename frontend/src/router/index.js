@@ -50,6 +50,12 @@ const routes = [
     name: 'Marketplace',
     component: () => import('@/views/Marketplace.vue'),
     meta: { title: '脚本市场' }
+  },
+  {
+    path: '/analytics',
+    name: 'Analytics',
+    component: () => import('@/views/Analytics.vue'),
+    meta: { title: '数据看板' }
   }
 ]
 

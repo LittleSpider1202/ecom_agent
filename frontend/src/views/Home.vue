@@ -35,6 +35,10 @@
                 <el-icon><Goods /></el-icon>
                 脚本市场
               </el-dropdown-item>
+              <el-dropdown-item @click="$router.push('/analytics')">
+                <el-icon><DataAnalysis /></el-icon>
+                数据看板
+              </el-dropdown-item>
               <el-dropdown-item divided>
                 <el-icon><SwitchButton /></el-icon>
                 退出登录
@@ -77,6 +81,10 @@
                 <div class="task-item" @click="$router.push('/marketplace')">
                   <el-icon><Goods /></el-icon>
                   <span class="nav-text">脚本市场</span>
+                </div>
+                <div class="task-item" @click="$router.push('/analytics')">
+                  <el-icon><DataAnalysis /></el-icon>
+                  <span class="nav-text">数据看板</span>
                 </div>
               </div>
             </el-collapse-transition>

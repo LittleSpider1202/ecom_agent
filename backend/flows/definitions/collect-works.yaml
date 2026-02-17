@@ -1,8 +1,8 @@
 # 流程定义 - 采集达人作品
 id: collect-works
 name: 采集达人作品
-version: 4
-description: 采集指定达人的作品列表，写入数据表
+version: 5
+description: 采集指定达人的作品列表，写入 NocoDB 数据表
 
 trigger:
   type: manual
@@ -66,39 +66,35 @@ parameters:
     required: true
     row: 2
     span: 4
-    showWhen:
-      sourceType: feishu
 
   - key: tableName
     type: string
-    label: 文件名
+    label: 表名
     input: select
     options: [达人名称, 达人名称_日期]
     default: 达人名称
     required: true
     row: 3
-    span: 12
+    span: 6
     showWhen:
       writeMode: 新建
 
   - key: tableId
     type: string
-    label: 多维表格ID
-    placeholder: 请输入多维表格ID
+    label: 表 ID
+    placeholder: NocoDB 表 ID（如 m_xxx）
     required: true
     row: 3
-    span: 12
+    span: 6
     showWhen:
-      sourceType: feishu
       writeMode: 追加
 
 # ============ 节点定义 ============
-# 前端展示为两个步骤，实际执行为一个 RPA 调用
-# fetch_works 包含全部 inputs 用于 RPA 执行
-# write_to_doc 仅用于前端展示参数分组，不参与执行
+# 单节点 RPA 调用：影刀采集数据 + 写入 NocoDB
+# 后端 RPA 执行器自动将 dataSourceId 解析为 dataSource 连接配置
 nodes:
-  - id: fetch_works
-    name: 采集作品
+  - id: fetch_and_write
+    name: 采集并写入
     category: execute
     type: rpa
     config:
@@ -113,23 +109,9 @@ nodes:
       tableId: "{{ tableId }}"
     outputs: []
 
-  - id: write_to_doc
-    name: 写入文档
-    category: display
-    type: rpa
-    config:
-      script: 采集作品-抖音
-    inputs:
-      dataSourceId: "{{ dataSourceId }}"
-      writeMode: "{{ writeMode }}"
-      tableName: "{{ tableName }}"
-      tableId: "{{ tableId }}"
-    outputs: []
-
 # ============ 连接定义 ============
-# 只有 fetch_works 参与实际执行流程
 connections:
-  start: fetch_works
-  fetch_works:
+  start: fetch_and_write
+  fetch_and_write:
     success: null
     error: null
