@@ -81,6 +81,26 @@ async def ingest_competitor_data(req: IngestRequest):
     }
 
 
+@router.get("/check")
+async def check_today_data(date: str = None):
+    """检查指定日期是否已有数据，返回记录数"""
+    from db.pg import get_pg_conn
+
+    conn = get_pg_conn()
+    cur = conn.cursor()
+
+    try:
+        cur.execute(
+            "SELECT COUNT(*) FROM competitor_daily WHERE date = COALESCE(%s, CURRENT_DATE)",
+            (date,),
+        )
+        count = cur.fetchone()[0]
+        return {"date": date or "today", "count": count, "exists": count > 0}
+    finally:
+        cur.close()
+        conn.close()
+
+
 @router.get("/latest")
 async def get_latest_data(days: int = 7):
     """查询最近 N 天的竞品数据"""

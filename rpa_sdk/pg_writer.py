@@ -57,16 +57,49 @@ except ImportError:
 SERVER_URL = os.environ.get("ECOM_SERVER_URL", "http://192.168.3.100:8088")
 
 
-def write_competitor_data(records, server_url=None):
+def check_today_written(date=None, server_url=None):
+    """检查指定日期是否已写入过数据。
+
+    Returns:
+        dict — {"date": "...", "count": N, "exists": True/False}
+    """
+    base = (server_url or SERVER_URL).rstrip("/")
+    url = base + "/api/competitor/check"
+    if date:
+        url += "?date=" + date
+
+    req = Request(url)
+    opener = build_opener(ProxyHandler({}))
+    try:
+        resp = opener.open(req, timeout=10)
+        return json.loads(resp.read().decode("utf-8"))
+    except Exception:
+        return {"exists": False, "count": 0}
+
+
+def write_competitor_data(records, server_url=None, force=False):
     """批量写入竞品数据到后端 PostgreSQL。
 
     Args:
         records: list[dict] — 竞品指标列表，每个 dict 至少包含 date 和 product_name
         server_url: str — 后端地址（可选）
+        force: bool — 强制写入，跳过重复检查
 
     Returns:
         dict — {"success": True, "inserted": N, "updated": M, "total": N+M}
+               或 {"skipped": True, "reason": "..."}
     """
+    if not force and records:
+        date = records[0].get("date")
+        check = check_today_written(date, server_url)
+        if check.get("exists"):
+            return {
+                "skipped": True,
+                "reason": "{} 已有 {} 条数据，跳过写入".format(
+                    check.get("date", date), check.get("count", 0)
+                ),
+            }
+
     url = (server_url or SERVER_URL).rstrip("/") + "/api/competitor/ingest"
 
     cleaned = []
