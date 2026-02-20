@@ -1,6 +1,5 @@
 """竞品数据写入 API"""
 import logging
-from datetime import datetime
 from typing import List, Optional
 
 from fastapi import APIRouter, HTTPException
@@ -11,22 +10,20 @@ router = APIRouter(prefix="/competitor", tags=["competitor"])
 
 
 class ProductMetric(BaseModel):
-    """单个商品的每日指标"""
+    """单个竞品的每日指标（值为 TEXT，支持范围如 '75~100'）"""
     date: str = Field(..., description="日期 YYYY-MM-DD")
     product_name: str = Field(..., min_length=1, description="商品名称")
     product_id: Optional[str] = Field(None, description="商品ID")
-    is_own: bool = Field(False, description="是否本店商品")
-    gmv: float = Field(0, description="GMV")
-    visitors: int = Field(0, description="访客数")
-    buyers: int = Field(0, description="支付买家数")
-    conversion_rate: float = Field(0, description="支付转化率")
-    price: float = Field(0, description="价格")
-    cart_adds: int = Field(0, description="加购人数")
+    visitors: str = Field("0", description="访客数")
+    buyers: str = Field("0", description="支付买家数")
+    conversion_rate: str = Field("0", description="支付转化率")
+    cart_adds: str = Field("0", description="加购人数")
+    favorites: str = Field("0", description="收藏人数")
 
 
 class IngestRequest(BaseModel):
     """批量写入请求"""
-    records: List[ProductMetric] = Field(..., min_length=1, description="商品指标列表")
+    records: List[ProductMetric] = Field(..., min_length=1)
 
 
 @router.post("/ingest")
@@ -44,24 +41,22 @@ async def ingest_competitor_data(req: IngestRequest):
         for r in req.records:
             cur.execute("""
                 INSERT INTO competitor_daily
-                    (date, product_name, product_id, is_own, gmv, visitors,
-                     buyers, conversion_rate, price, cart_adds)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    (date, product_name, product_id, visitors,
+                     buyers, conversion_rate, cart_adds, favorites)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
                 ON CONFLICT (date, product_id)
                 DO UPDATE SET
                     product_name = EXCLUDED.product_name,
-                    is_own = EXCLUDED.is_own,
-                    gmv = EXCLUDED.gmv,
                     visitors = EXCLUDED.visitors,
                     buyers = EXCLUDED.buyers,
                     conversion_rate = EXCLUDED.conversion_rate,
-                    price = EXCLUDED.price,
-                    cart_adds = EXCLUDED.cart_adds
+                    cart_adds = EXCLUDED.cart_adds,
+                    favorites = EXCLUDED.favorites
                 RETURNING (xmax = 0) AS is_insert
             """, (
-                r.date, r.product_name, r.product_id, r.is_own,
-                r.gmv, r.visitors, r.buyers, r.conversion_rate,
-                r.price, r.cart_adds,
+                r.date, r.product_name, r.product_id,
+                r.visitors, r.buyers, r.conversion_rate,
+                r.cart_adds, r.favorites,
             ))
             row = cur.fetchone()
             if row and row[0]:
@@ -96,8 +91,8 @@ async def get_latest_data(days: int = 7):
 
     try:
         cur.execute("""
-            SELECT date, product_name, product_id, is_own,
-                   gmv, visitors, buyers, conversion_rate, price, cart_adds
+            SELECT date, product_name, product_id,
+                   visitors, buyers, conversion_rate, cart_adds, favorites
             FROM competitor_daily
             WHERE date >= CURRENT_DATE - %s
             ORDER BY date DESC, product_name
@@ -106,13 +101,10 @@ async def get_latest_data(days: int = 7):
         columns = [desc[0] for desc in cur.description]
         rows = [dict(zip(columns, row)) for row in cur.fetchall()]
 
-        # Serialize
         for row in rows:
             for k, v in row.items():
                 if hasattr(v, "isoformat"):
                     row[k] = v.isoformat()
-                elif hasattr(v, "as_tuple"):
-                    row[k] = float(v)
 
         return {"records": rows, "count": len(rows)}
     finally:
