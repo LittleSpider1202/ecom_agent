@@ -32,6 +32,7 @@ from api.utils import router as utils_router
 from api.storage import router as storage_router
 from api.workers import router as workers_router
 from api.marketplace import router as marketplace_router
+from api.competitor import router as competitor_router
 from flows.registry import load_flows
 from scheduler.job_scheduler import job_scheduler
 from scheduler.worker_monitor import check_worker_heartbeats
@@ -117,6 +118,7 @@ app.include_router(utils_router, prefix=API_PREFIX)
 app.include_router(storage_router, prefix=API_PREFIX)
 app.include_router(workers_router, prefix=API_PREFIX)
 app.include_router(marketplace_router, prefix=API_PREFIX)
+app.include_router(competitor_router, prefix=API_PREFIX)
 
 
 @app.on_event("startup")
