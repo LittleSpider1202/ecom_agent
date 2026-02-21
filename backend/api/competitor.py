@@ -28,7 +28,7 @@ class IngestRequest(BaseModel):
 
 @router.post("/ingest")
 async def ingest_competitor_data(req: IngestRequest):
-    """批量写入竞品每日数据（upsert：同日期+商品ID 覆盖更新）"""
+    """批量写入竞品每日数据（upsert：同日期+商品名称 覆盖更新）"""
     from db.pg import get_pg_conn
 
     conn = get_pg_conn()
@@ -44,9 +44,9 @@ async def ingest_competitor_data(req: IngestRequest):
                     (date, product_name, product_id, visitors,
                      buyers, conversion_rate, cart_adds, favorites)
                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-                ON CONFLICT (date, product_id)
+                ON CONFLICT (date, product_name)
                 DO UPDATE SET
-                    product_name = EXCLUDED.product_name,
+                    product_id = EXCLUDED.product_id,
                     visitors = EXCLUDED.visitors,
                     buyers = EXCLUDED.buyers,
                     conversion_rate = EXCLUDED.conversion_rate,
